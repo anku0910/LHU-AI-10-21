@@ -62,18 +62,29 @@ HTTP 429：請求過多或額度不足。請查看 AI Studio 專案配額，稍�
 改完 system_prompt 後我有再重跑了 --simulate timeout、--simulate quota、--simulate missing_key，三種錯誤訊息都照常出現，程式沒有因為改設定而壞掉。
 
 我用自己的話說明
-Coding Agent 的工作：讀懂三個檔案的分工，跟我解釋程式碼的運作過程，幫助排解問題與進行python安裝等
+Coding Agent 的工作：
+讀懂三個檔案的分工，跟我解釋程式碼的運作過程，幫我排解問題，也幫我裝 Python 3
+（原本電腦上只有 Microsoft Store 的假捷徑，後來用 winget 裝成 Python 3.13.15）。
+它沒有碰我的金鑰，API 是我自己開終端機跑 ask_ai.py 才送出去的。
+
 我的程式如何呼叫 LLM：
+1. 收問題 → ask_ai.py:38，input("你的問題：")
+2. 交棒 → ask_ai.py:50，answer = ask_model(question, config)
+3. 送出去 → gemini_client.py:42–57，組 endpoint、body、header
+4. 收回應 → gemini_client.py:59–60，urlopen() → json.loads()
+5. 撈文字 → gemini_client.py:14–25，extract_text()，濾掉 thought: true
 
-步驟	位置	做什麼
-1. 收問題	ask_ai.py:38	input("你的問題：")
-2. 交棒	ask_ai.py:50	answer = ask_model(question, config)
-3. 送出去	gemini_client.py:42–57	組 endpoint、body、header
-4. 收回應	gemini_client.py:59–60	urlopen() → json.loads()
-5. 撈文字	gemini_client.py:14–25	extract_text()，濾掉 thought: true
-"api_key = os.environ.get("GEMINI_API_KEY", "").strip()"這個抓os.environ的指令在gemini_client.py:43中
+金鑰不是寫在程式裡，是從環境變數抓的：
+  api_key = os.environ.get("GEMINI_API_KEY", "").strip()     （gemini_client.py:43）
 
-AI 回答為什麼仍需核對：首先要看有否回傳，確定不是空字串。
-再來是確認內容，可能會掰東西，所以config.json 才要特別寫"資訊不足時請說明，不要編造學校公告"，所以我改成了"學術文筆、碩士等級"後面就丟了一堆SEM、內生性偏誤、共線性威脅不少無法當資管大三學生教材的內容。
-再來就是--demo 的答案是預先設定的 "ask_ai.py:46–48" 寫死了一個 payload，所以不管問什麼都回同一段。不能當成模型真的回答。
+AI 回答為什麼仍需核對：
+第一，先看有沒有回傳，確定不是空字串。但 extract_text() 只檢查「是不是空的」，
+沒有檢查內容對不對。
+第二，內容可能會掰，所以 config.json 才要特別寫「資訊不足時請說明，不要編造學校公告」。
+我自己改成「學術文筆、碩士等級」之後，模型後面就丟了一堆 SEM、內生性偏誤、共線性威脅，
+全是無法當資管大三學生教材的內容。
+第三，--demo 的答案是預先設定的，ask_ai.py:46–48 寫死了一個 payload，
+所以不管問什麼都回同一段，不能當成模型真的回答。
+所以程式只保證「連得上、拿得到」，對不對還是要自己看過才敢交。
+
 交付前確認程式與截圖沒有金鑰：是
