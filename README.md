@@ -306,26 +306,35 @@ epistemological（知識論）與 methodological（方法論）單元。
 
 ### Coding Agent 的工作
 
-Coding Agent（OpenCode）做的事，主要是幫我讀懂這個專案原本在做什麼，而不是直接幫我把答案生出來。它讀完 `ask_ai.py`、`gemini_client.py`、`config.json` 之後，幫我把三個檔案的分工講清楚：哪裡負責收問題、哪裡負責真的打 API、哪裡負責把答案印出來，也告訴我 `GEMINI_API_KEY` 是用 `os.environ` 從環境變數讀出來的，不要寫進程式裡面。改 `system_prompt` 的時候，它幫我確認 JSON 沒有被改壞，也提醒我要重跑同一個問題才比較得出前後差異。它沒有碰我的金鑰，API 是我自己開終端機跑 `ask_ai.py` 才發出去的。
-
-> 總結：**它負責「讓你懂」，我負責「真的跑」。** 檔案之間的接點是 `ask_ai.py` 第 5 行的 `from gemini_client import ...`，而金鑰只在 `gemini_client.py` 第 43 行被讀一次，兩處都是老師可以隨時查證的。
+讀懂三個檔案的分工，跟我解釋程式碼的運作過程，幫我排解問題，也幫我裝 Python 3
+（原本電腦上只有 Microsoft Store 的假捷徑，後來用 winget 裝成 Python 3.13.15）。
+它沒有碰我的金鑰，API 是我自己開終端機跑 `ask_ai.py` 才送出去的。
 
 ### 我的程式如何呼叫 LLM
 
-`ask_ai.py` 和 `gemini_client.py` 是分工的。`ask_ai.py` 負責收問題跟顯示，它用 `input()` 拿到我打的字，丟給 `gemini_client.py` 的 `ask_model()`，最後把拿到的文字用 `print()` 印出來，中間把錯誤都換成中文訊息，所以沒設金鑰或逾時的時候不會直接噴 traceback 出來。
+| 步驟 | 位置 | 做什麼 |
+| --- | --- | --- |
+| 1. 收問題 | `ask_ai.py:38` | `input("你的問題：")` |
+| 2. 交棒 | `ask_ai.py:50` | `answer = ask_model(question, config)` |
+| 3. 送出去 | `gemini_client.py:42–57` | 組 endpoint、body、header |
+| 4. 收回應 | `gemini_client.py:59–60` | `urlopen()` → `json.loads()` |
+| 5. 撈文字 | `gemini_client.py:14–25` | `extract_text()`，濾掉 `thought: true` |
 
-真正送出 request 的是 `ask_model()`：它用標準庫的 `urllib.request`，POST 到 `https://generativelanguage.googleapis.com/v1beta/models/{model}:generateContent`，模型名稱先經過 `quote()` 編碼，金鑰放在 `x-goog-api-key` 這個 header，逾時秒數則是從 `config.json` 的 `timeout_seconds` 讀的。body 送兩個東西，`systemInstruction` 放 `config.json` 的 `system_prompt`，`contents` 則是 `role=user` 加上我的問題。回來是 JSON，`extract_text()` 從 `candidates[0].content.parts` 抓 `text`，並把 `thought=true` 的思考片段濾掉，避免模型腦內推理混進正式答案。整個專案只用標準函式庫，不用 `pip install`。
+金鑰不是寫在程式裡，是從環境變數抓的：
 
-> 流程五步：**收問題 → 交棒 `ask_model()` → 組 request 送出 → `urlopen()` 收 JSON → `extract_text()` 撈文字**。
+```python
+api_key = os.environ.get("GEMINI_API_KEY", "").strip()    # gemini_client.py:43
+```
 
 ### AI 回答為什麼仍需核對
 
-程式只保證「有拿到文字」，不保證「內容是對的」。我這次問「請用兩句話解釋變數」，模型給的答案其實偏研究方法而不是資管生的直覺說法，尤其改成「學術文筆、碩士等級」那段 prompt 之後更明顯——技術上不算錯，但對大三學生來說很難直接當教材，這種就得自己判斷合不合用途。模型也可能把比喻講得不太對，或是摻進我根本沒問過的東西，嚴重一點還會自己編造不存在的事實，所以 `system_prompt` 才要特別寫「資訊不足時請說明，不要編造學校公告」。另外要分清楚 `--demo`：它印的是寫死的固定範例，不管問什麼答案都一樣，那個不能當成模型真的回答。再來像 429 這種錯誤，就算程式把錯誤處理得很漂亮，答案還是拿不到。總結來說程式只管「連得上、拿得到」，對不對還是要自己看過才敢交。
+**第一**，先看有沒有回傳，確定不是空字串。但 `extract_text()` 只檢查「是不是空的」，沒有檢查內容對不對。
 
-> **三層理由**：
-> 1. **技術層** —— `extract_text()` 唯一的檢查是「答案是不是空字串」（`gemini_client.py:23`），沒有任何語意判斷。
-> 2. **內容層** —— 模型會編造。第三節那段追問就是證據：它自承「資訊不足，無法憑空編造」，代表它本來就可能編。
-> 3. **模式層** —— `--demo` 的答案是 `ask_ai.py:46–48` 寫死的字串，不是模型的回答。
+**第二**，內容可能會掰，所以 `config.json` 才要特別寫「資訊不足時請說明，不要編造學校公告」。我自己改成「學術文筆、碩士等級」之後，模型後面就丟了一堆 SEM、內生性偏誤、共線性威脅，全是無法當資管大三學生教材的內容。
+
+**第三**，`--demo` 的答案是預先設定的，`ask_ai.py:46–48` 寫死了一個 payload，所以不管問什麼都回同一段，不能當成模型真的回答。
+
+所以程式只保證「連得上、拿得到」，對不對還是要自己看過才敢交。
 
 ---
 
